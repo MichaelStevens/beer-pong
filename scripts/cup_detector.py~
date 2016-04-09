@@ -1,0 +1,100 @@
+#!/usr/bin/env python
+import roslib
+roslib.load_manifest('exploration')
+import sys
+import rospy
+import cv2
+import numpy as np
+from sensor_msgs.msg import Image, PointCloud2
+from geometry_msgs.msg import PointStamped
+from exploration.msg import PointList
+from visualization_msgs.msg import Marker
+from cv_bridge import CvBridge, CvBridgeError
+from attention import attention_map
+from std_srvs.srv import Empty
+
+class MovingAverage:''
+    def __init__(self, n):
+        self.n = n
+        self.values = []
+
+    def clear(self):
+        self.values = []
+
+    def update(self, x):
+        if len(self.values) < self.n:
+            self.values.append(float(x))
+        else:
+            self.values = self.values[1:] + [x]
+
+    def value(self):
+        if len(self.values) == 0: return None
+        return sum(self.values) / len(self.values)
+
+
+class CupDetector:
+    def __init__(self):
+        self.bridge = CvBridge()
+        self.image_sub = rospy.Subscriber("/camera/rgb/image_rect_mono", Image, self.camera_callback)
+        self.depth_sub = rospy.Subscriber("/camera/depth/image_rect_raw", Image, self.depth_callback)
+        self.camera_image = None
+        self.depth_image = None
+        self.fx = 572.882768
+        self.fy = 542.739980
+        self.cx = 314.649173
+        self.cy = 240.160459
+        self.x_smooth = MovingAverage(13)
+        self.y_smooth = MovingAverage(13)
+        self.z_smooth = MovingAverage(13)
+
+    def clear_smoothers(self, data):
+        self.x_smooth.clear()
+        self.y_smooth.clear()
+        self.z_smooth.clear()
+        return []
+
+    def camera_callback(self, data):
+        try:
+            self.camera_image = self.bridge.imgmsg_to_cv2(data)
+        except CvBridgeError, e:
+            print e
+
+        if self.depth_image != None:
+            #attention_image = attention_map(self.camera_image)
+            #p = np.argmax(attention_image)
+            #(x, y, z) = self.index2point(p)
+
+            #if not (x == 0 and y == 0 and z == 0) and y > 0:
+            #    self.x_smooth.update(x)
+            #    self.y_smooth.update(y)
+            #    self.z_smooth.update(z)
+
+
+
+    def depth_callback(self, data):
+        try:
+            self.depth_image = self.bridge.imgmsg_to_cv2(data)
+        except CvBridgeError, e:
+            print e
+            return
+
+    def index2point(self, index):
+        Z = self.depth_image.item(index)
+        x = index % self.depth_image.shape[1]
+        y = int(index / self.depth_image.shape[1])
+        X = (Z / self.fx) * (x - self.cx)
+        Y = (Z / self.fy) * (y - self.cy)
+        return (X / 1000., Y / 1000., Z / 1000.)
+
+def main(args):
+    rospy.init_node('int_point_pub', anonymous=True)
+    cup_detector = CupDetector()
+    try:
+        rospy.spin()
+    except KeyboardInterrupt:
+        print "Shutting down"
+
+
+
+if __name__ == '__main__':
+    main(sys.argv)
